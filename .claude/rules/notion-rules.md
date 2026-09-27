@@ -22,7 +22,7 @@ más abajo).
 | `Category` | `relation` (a data source `Category`, `limit: 1`) | **No es un select** — es relación a una página existente en la data source `Category` (ver abajo). Escribir requiere el ID de esa página, no un string libre. |
 | `Payment Method` | `select` | Opciones fijas: `Credit Card`, `Debit Card`, `Bank`, `Cash`. Cualquier otro valor lo rechaza Notion. |
 | `Notes` | `rich_text` | Opcional. |
-| `Receipt` | `file` | Opcional, adjuntos. |
+| `Receipt` | `file` (`files`) | Opcional. Escribir requiere un `file_upload` real (ver sección File Upload API abajo) — no se puede guardar un link externo de Telegram (expira). |
 | `Type` | `select` | **Agregada el 2026-09-20** — el schema original no tenía ningún campo de tipo (era solo gastos). Opciones: `Egreso`, `Ingreso`. `Amount` sigue siempre positivo; el signo lo da `Type`, no el número. |
 | `Add to Month` | `formula` | **Solo lectura** — Notion la calcula, la API rechaza escrituras en propiedades `formula`. No mapear en el cliente. |
 
@@ -67,13 +67,34 @@ fue lo que se pidió. Ver
 `.claude/history/2026-09-20-notion-schema-add-type.md`. Sin pendientes
 de validación de esquema/cliente.
 
-**2026-09-20 (feature 001 implementada):** `notion.CategoryResolver`
-(`internal/infrastructure/notion/category_resolver.go`) resuelve
+**2026-09-20 (feature 001 implementada):** `Services.Resolve`
+(`pkg/notion/services/categories.go`) resuelve
 nombre → ID de página contra esta data source vía `POST
 /v1/data_sources/{id}/query`, cacheado en memoria (TTL 5 min).
-Validado end-to-end junto con `Registrar` (usecase): mensaje con
+Validado end-to-end junto con `transaction/services`: mensaje con
 categoría real (`comida`) → resuelto → página creada en `Expenses` con
 la relación correcta. Página de prueba archivada después.
+
+### File Upload API — implementado el 2026-09-20 (feature 006)
+
+Para adjuntar un archivo real a `Receipt` (no un link externo): dos
+pasos.
+
+1. `POST /v1/file_uploads` (body `{}`) → `{"id": ..., "upload_url":
+   ...}`.
+2. `POST <upload_url>` con `multipart/form-data`, campo `file` con el
+   contenido real y su `Content-Type` — queda `status: uploaded`.
+
+El `id` del paso 1 se referencia en la propiedad de la página:
+`"Receipt": {"files": [{"type": "file_upload", "file_upload": {"id":
+"<id>"}}]}`. Implementado en
+`pkg/notion/services/upload_receipt.go`
+(`Services.Upload`). Validado end-to-end con una foto real de Telegram:
+el archivo queda nativo en Notion (`type: "file"`), no un link.
+
+Límite de tamaño del File Upload API en modo `single_part`: no
+confirmado explícitamente todavía (no hizo falta con la foto de prueba
+real) — revisar antes de subir archivos grandes.
 
 ## Reglas generales
 
@@ -81,11 +102,11 @@ la relación correcta. Página de prueba archivada después.
 - `NOTION_DATABASE_ID` = ID de la data source `Expenses` (ver tabla
   arriba), no el ID de la página contenedora "Expense Tracker".
 - `NOTION_CATEGORY_DATA_SOURCE_ID` = ID de la data source `Category`
-  (ver tabla arriba) — la usa `notion.CategoryResolver`.
-- `internal/infrastructure/notion/` es dueño de todas las llamadas a la
-  API de Notion y del mapeo de propiedades. La capa usecase no importa
-  tipos del SDK/cliente de Notion.
-- `domain.Transaction` mapea a propiedades de página de Notion en una
+  (ver tabla arriba) — la usa `Services.Resolve`.
+- `pkg/notion/services/` es dueño de todas las llamadas a la
+  API de Notion y del mapeo de propiedades. Fuera de ese paquete nadie importa
+  el cliente de Notion, solo los puertos de `pkg/ports`.
+- `transaction.Transaction` mapea a propiedades de página de Notion en una
   sola función centralizada (`mapTransactionToProperties`) — no
   dispersar el mapeo.
 - Rate limit de la API de Notion (~3 req/seg promedio) — batchear o

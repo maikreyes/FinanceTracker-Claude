@@ -3,9 +3,7 @@
 1. Historias de usuario → `specs/features/NNN-nombre-feature/`
    (`spec.md`, `plan.md`, `tasks.md`) antes de tocar código. Crear la
    spec no implica empezar a implementar.
-2. No implementar hasta que el usuario lo indique explícitamente — hoy
-   los clientes reales de Telegram/Notion y el parser son stubs a
-   propósito.
+2. No implementar hasta que el usuario lo indique explícitamente.
 3. Plan primero, siempre, para tareas no triviales (tocan el contrato
    entre capas, agregan una dependencia externa, cambian la entidad
    `Transaction`) — proponer plan corto, esperar OK. Cambios chicos y

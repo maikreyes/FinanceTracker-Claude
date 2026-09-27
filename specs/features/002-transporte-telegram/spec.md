@@ -1,6 +1,6 @@
 # 002 · Transporte Telegram (long-polling)
 
-**Estado:** propuesta
+**Estado:** implementado ✅ (probado con Telegram real — falta 003 antes de dejarlo corriendo sin supervisión, hoy acepta cualquier chat)
 
 ## Qué hace
 

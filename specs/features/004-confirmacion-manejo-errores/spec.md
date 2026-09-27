@@ -1,6 +1,6 @@
 # 004 · Confirmación y manejo de errores en el chat
 
-**Estado:** propuesta
+**Estado:** implementado ✅ (validado en vivo: error de medio de pago no reconocido + registro exitoso con categoría)
 
 ## Qué hace
 

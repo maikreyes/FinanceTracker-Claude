@@ -1,6 +1,6 @@
 # 003 · Restringir acceso al bot
 
-**Estado:** propuesta
+**Estado:** implementado ✅ (validado en vivo: chat autorizado procesa, chat no autorizado se ignora en silencio)
 
 ## Qué hace
 

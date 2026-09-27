@@ -7,55 +7,71 @@ transacciones financieras y las escribe en una base de datos de Notion.
 
 - Lenguaje: Go 1.23+
 - Módulo: `finance-tracker` (`go.mod`, raíz del repo)
-- Sin dependencias externas todavía (solo stdlib)
-- Arquitectura: Clean Architecture (`domain` / `usecase` / `infrastructure`)
-- Punto de entrada: `cmd/bot/main.go`
+- Dependencias externas: solo `github.com/joho/godotenv` (cargar `.env`
+  en `cmd/`); todo lo demás es stdlib
+- Arquitectura: por feature con puertos, el mismo patrón que
+  `maikreyes/Triggo/WebHook` (`api/`, `cmd/`, `pkg/<feature>/{handler,model,services}`,
+  `pkg/ports`)
+- Puntos de entrada: `cmd/main.go` (long-polling, local) y
+  `api/webhook.go` (función serverless de Vercel)
 
 ## Comandos
 
 - `go build ./...` — compila todo el módulo
-- `go run ./cmd/bot` — corre el bot en local
+- `go run ./cmd` — corre el bot en local (long-polling, carga `.env`)
+- `go run ./cmd/setwebhook -url https://<proyecto>.vercel.app/api/webhook`
+  — apunta el webhook de Telegram a Vercel (`-delete` lo borra)
 - `go vet ./...` — chequeo estático
-- `go test ./...` — tests (aún no hay ninguno escrito)
+- `go test -race ./...` — tests
 - `gofmt -l .` — lista archivos mal formateados
 
 ## Estructura del proyecto
 
-- `cmd/bot/` — punto de entrada único (`main.go`). Wiring de
-  dependencias (inyecta infraestructura concreta en los usecases) y
-  arranque del bot.
-- `internal/domain/` — entidad núcleo `Transaction{Name, Amount, Type,
-  Date, CategoryID, PaymentMethod, Notes, ReceiptURLs}`, calcada 1:1
-  del esquema real de la data source "Expenses" de Notion (ver
-  `.claude/rules/notion-rules.md`). `Type` = `Egreso`/`Ingreso`. Sin
-  imports fuera de la stdlib.
-- `internal/usecase/` — lógica de negocio: parseo de mensajes en lenguaje
-  natural a `domain.Transaction`, orquestación del guardado en Notion.
-  Depende solo de `domain` y de interfaces (ports), nunca de tipos
-  concretos de infraestructura.
-- `internal/infrastructure/telegram/` — adaptador de la Telegram Bot API
-  (recibe updates, los convierte en llamadas a usecase). Reglas propias
-  en `.claude/rules/telegram-rules.md`.
-- `internal/infrastructure/notion/` — adaptador de la Notion API (mapea
-  `Transaction` a propiedades de página, crea páginas). Reglas propias
-  en `.claude/rules/notion-rules.md`.
+- `api/webhook.go` — `Handler`, la función serverless de Vercel. Cablea
+  las dependencias una vez por instancia (`sync.Once`) con el store de
+  Upstash y delega en `Handler.WebhookHandler`. `vercel.json` fija su
+  `maxDuration`.
+- `cmd/main.go` — long-polling para desarrollo local, con el store en
+  memoria. `cmd/setwebhook/` — comando de un solo uso para
+  configurar o borrar el webhook.
+- `pkg/config/` — `Config` leído del entorno (`NewConfig`) y sus
+  validaciones por modo (`CheckTelegram`, `CheckWebhook`).
+- `pkg/ports/` — las interfaces, un archivo por dominio (`telegram.go`,
+  `notion.go`, `groq.go`, `store.go`, `transaction.go`). Lo único de lo
+  que dependen `handler` y `services`.
+- `pkg/transaction/` — la lógica de negocio. `model/` (subpaquetes
+  `transaction`, `register`, `summary`, `receipt`, `failure`) y
+  `services/` (parseo de mensajes y registro de movimientos).
+- `pkg/telegram/` — `model/` (`update`, `keyboard`, `command`,
+  `chatstate`), `services/` (cliente de la Bot API, implementa
+  `ports.Messenger`) y `handler/` (`Dispatch`, flujo guiado, botones,
+  `WebhookHandler`).
+- `pkg/notion/services/` — cliente de la Notion API (movimientos,
+  recibos, resumen, último movimiento, categorías). Reglas en
+  `.claude/rules/notion-rules.md`.
+- `pkg/groq/services/` — interpreta la foto de un recibo con IA.
+- `pkg/store/services/` — `ChatStore` en memoria (local) y en Upstash
+  Redis (producción).
+- `pkg/app/` — raíz de composición compartida por `api/` y `cmd/`.
 
 ## Flujo de datos
 
 ```
-Telegram message -> internal/infrastructure/telegram (recibe update)
-                  -> internal/usecase (parsea texto -> domain.Transaction)
-                  -> internal/infrastructure/notion (mapea -> crea página)
-                  -> Base de datos de Notion
+Telegram -> api/webhook.go | cmd/main.go
+         -> pkg/telegram/handler (autoriza, decide, guarda estado en ChatStore)
+         -> pkg/transaction/services (parsea, resuelve categoría, registra)
+         -> pkg/notion/services (crea la página)  |  pkg/groq/services (foto)
 ```
 
 ## Convenciones
 
-- Dirección de dependencia: `infrastructure -> usecase -> domain`. El
-  dominio no depende de nada externo.
+- Dependencias: `handler` y `services` dependen de `pkg/ports` y de
+  `model`, nunca entre sí ni de otra feature. `model` solo importa la
+  stdlib y otros `model`. Solo `pkg/app`, `api/` y `cmd/` conocen las
+  implementaciones concretas.
+- Cada `services/` tiene `services.go` (struct + `NewServices`) y un
+  archivo por operación.
 - Nombre de paquete = nombre de carpeta.
-- Infraestructura implementa interfaces definidas por usecase (ports),
-  nunca al revés — usecase no debe importar infraestructura.
 - Secretos solo vía variables de entorno (ver `.env.example`), nunca
   hardcodeados. Ver `.claude/rules/seguridad.md`.
 - Comentarios: solo si explican un WHY no obvio. Ver
@@ -69,10 +85,9 @@ Telegram message -> internal/infrastructure/telegram (recibe update)
 - Ningún dato sensible hardcodeado (token de Telegram, API key de
   Notion, database id) — siempre variable de entorno.
 - No agregar dependencias externas (`go get`) sin avisar antes y
-  explicar por qué.
-- No implementar los clientes reales de Telegram/Notion ni el parser de
-  mensajes hasta que se indique explícitamente — hoy son stubs
-  (`TODO`) a propósito.
+  explicar por qué (hoy solo `godotenv`).
+- No desplegar a Vercel ni correr `cmd/setwebhook` contra el bot real
+  sin que el usuario lo pida: toca su Telegram y su Notion reales.
 
 ## Flujo de trabajo
 
